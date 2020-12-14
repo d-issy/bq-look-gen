@@ -45,7 +45,7 @@ class TableInfo:
 
     @property
     def path(self) -> Path:
-        return Path('.', 'views', self._t.dataset_id, f'{self.clear_name}.view')
+        return Path('.', 'views', self._t.dataset_id, f'{self.clear_name}.view.lkml')
 
     def create_dir(self):
         if not self.path.parents[0].is_dir():
@@ -176,7 +176,7 @@ def main():
     for info in tables_info:
         info.create_dir()
         with info.path.open('w') as f:
-            print(f'write {info.clear_name}.view')
+            print(f'write {info.clear_name}.view.lkml')
             write_look_ml(f, info)
 
 
