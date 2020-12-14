@@ -3,15 +3,19 @@ import dataclasses
 import itertools
 import re
 from pathlib import Path
-from typing import ClassVar, Iterable, Iterator, List
+from typing import ClassVar, Iterable, Iterator, List, Optional
+
+import pandas as pd
+from google.cloud import bigquery
+from google.cloud import bigquery_storage
 from typing.io import TextIO
 
-from google.cloud import bigquery
 
-
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass
 class TableInfo:
-    _t: bigquery.Table
+    _t: bigquery.TableReference
+    _schema: Optional[List[bigquery.SchemaField]] = None
+    client: ClassVar[Optional[bigquery.Client]] = None
     _shard_suffix: ClassVar[str] = r'_\d{8}$'
 
     @property
@@ -32,7 +36,9 @@ class TableInfo:
 
     @property
     def schema(self) -> List[bigquery.SchemaField]:
-        return self._t.schema
+        if self._schema is None:
+            self._schema = self.client.get_table(self._t).schema
+        return self._schema
 
     def is_sharding(self) -> bool:
         return bool(re.match(self._shard_suffix, self.name))
@@ -45,30 +51,28 @@ class TableInfo:
         if not self.path.parents[0].is_dir():
             self.path.parents[0].mkdir(parents=True)
 
-    def cat(self):
-        with self.path.open('r') as f:
-            print(f.read())
-
-
-def get_client() -> bigquery.Client:
-    return bigquery.Client()
-
 
 def get_dataset(project_id: str, dataset_id: str) -> bigquery.Dataset:
     return bigquery.Dataset(bigquery.DatasetReference(project_id, dataset_id))
 
 
-def get_tables(client: bigquery.Client, dataset: bigquery.Dataset) -> Iterator[bigquery.Table]:
-    tables: Iterator[bigquery.table.TableListItem] = client.list_tables(dataset)
-    for t in tables:
-        yield client.get_table(t.reference)
+def get_table_refs(
+        bq_client: bigquery.Client,
+        bq_storage_client: bigquery_storage.BigQueryReadClient,
+        dataset: bigquery.Dataset
+):
+    query = f"select table_id from {dataset.project}.{dataset.dataset_id}.__TABLES__"
+    df: pd.DataFrame = bq_client.query(query).to_dataframe(bqstorage_client=bq_storage_client)
+    for table_id in df.table_id:
+        if table_id is not None:
+            yield bigquery.TableReference(dataset.reference, table_id)
 
 
-def get_tables_info(tables: Iterator[bigquery.Table]) -> Iterator[TableInfo]:
+def get_tables_info(tables: Iterator[bigquery.TableReference]) -> Iterator[TableInfo]:
     return sorted([TableInfo(t) for t in tables], key=lambda x: (x.clear_name, x.name))
 
 
-def filter_latest_table_info(table_info: Iterable[TableInfo]) -> Iterator[TableInfo]:
+def filter_latest_tables_info(table_info: Iterable[TableInfo]) -> Iterator[TableInfo]:
     for _, group in itertools.groupby(table_info, key=lambda x: x.clear_name):
         yield list(group)[-1]
 
@@ -157,15 +161,22 @@ def parse_args():
 
 def main():
     args = parse_args()
-    client = get_client()
+
+    bq_client = bigquery.Client()
+    bqs_client = bigquery_storage.BigQueryReadClient()
+
+    TableInfo.client = bq_client
+
     dataset = get_dataset(args.project_id, args.dataset_id)
 
-    tables = get_tables(client, dataset)
-    table_info = filter_latest_table_info(get_tables_info(tables))
+    table_refs = get_table_refs(bq_client, bqs_client, dataset)
+    tables_info = get_tables_info(table_refs)
+    tables_info = filter_latest_tables_info(tables_info)
 
-    for info in table_info:
+    for info in tables_info:
         info.create_dir()
         with info.path.open('w') as f:
+            print(f'write {info.clear_name}.view')
             write_look_ml(f, info)
 
 
