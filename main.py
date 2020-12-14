@@ -16,7 +16,7 @@ class TableInfo:
     _t: bigquery.TableReference
     _schema: Optional[List[bigquery.SchemaField]] = None
     client: ClassVar[Optional[bigquery.Client]] = None
-    _shard_suffix: ClassVar[str] = r'_\d{8}$'
+    _shard_suffix: ClassVar[str] = r'_\d{8}\Z'
 
     @property
     def project_id(self) -> str:
@@ -41,7 +41,7 @@ class TableInfo:
         return self._schema
 
     def is_sharding(self) -> bool:
-        return bool(re.match(self._shard_suffix, self.name))
+        return bool(re.search(self._shard_suffix, self.name))
 
     @property
     def path(self) -> Path:
@@ -125,9 +125,9 @@ def write_record_child(f: TextIO, field: bigquery.SchemaField, prefix: str):
 
 def write_look_ml(f: TextIO, info: TableInfo):
     # write view
-    f.write(f'view: {info.clear_name} {{\n')
+    f.write(f'view: {info.dataset_id}__{info.clear_name} {{\n')
     f.write(f'  sql_table_name: `{info.project_id}.{info.dataset_id}.{info.clear_name}')
-    if info.is_sharding:
+    if info.is_sharding():
         f.write('_*')
     f.write('`\n    ;;\n\n')
 
@@ -149,7 +149,7 @@ def write_look_ml(f: TextIO, info: TableInfo):
     f.write('}\n\n')
 
     for field in filter(lambda x: x.field_type == 'RECORD', info.schema):
-        write_record_child(f, field, f'{info.clear_name}__')
+        write_record_child(f, field, prefix=f'{info.dataset_id}__{info.clear_name}__')
 
 
 def parse_args():
