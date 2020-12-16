@@ -85,7 +85,7 @@ def write_field(f: TextIO, field: bigquery.SchemaField):
         if field.name == 'id':
             f.write('    primary_key: yes\n')
 
-    if field.field_type == ['INTEGER', 'FLOAT', 'NUMERIC']:
+    if field.field_type in ['INTEGER', 'FLOAT', 'NUMERIC']:
         f.write('    type: number\n')
     elif field.field_type == 'BOOLEAN':
         f.write('    type: yesno\n')
